@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { CalendarDays, ChevronLeft, ChevronRight, CircleAlert, LoaderCircle, Plus, Search } from 'lucide-react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import api from '../api.js'
+import ExportOrdersButton from '../components/ExportOrdersButton.jsx'
 
 const money = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 })
 const number = new Intl.NumberFormat('ru-RU')
@@ -79,6 +80,7 @@ function OrdersPage() {
 
 	return (
 		<div className="space-y-5">
+			<ExportOrdersButton/>
 			<div className="flex flex-wrap items-end justify-between gap-3">
 				<div>
 					<h3 className="m-0 font-display text-2xl font-bold text-slate-900">Заказы</h3>

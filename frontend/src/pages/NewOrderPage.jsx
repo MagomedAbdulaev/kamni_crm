@@ -19,7 +19,6 @@ function NewOrderPage() {
 		price: '',
 		due_date: '',
 		comment: '',
-		processing: [],
 	})
 	const [loading, setLoading] = useState(true)
 	const [saving, setSaving] = useState(false)
@@ -31,9 +30,8 @@ function NewOrderPage() {
 			api.get('clients/'),
 			api.get('materials/'),
 			api.get('product-types/'),
-			api.get('processing-types/'),
 		])
-			.then(([clients, materials, productTypes, processingTypes]) => {
+			.then(([clients, materials, productTypes]) => {
 				if (!isMounted) return
 				const clientOptions = clients.data.results ?? clients.data
 				const materialOptions = materials.data.results ?? materials.data
@@ -42,7 +40,6 @@ function NewOrderPage() {
 					clients: clientOptions,
 					materials: materialOptions,
 					productTypes: productOptions,
-					processingTypes: processingTypes.data.results ?? processingTypes.data,
 				})
 				setForm((current) => ({
 					...current,
@@ -66,15 +63,6 @@ function NewOrderPage() {
 		setForm((current) => ({ ...current, [name]: value }))
 	}
 
-	function toggleProcessing(typeId, checked) {
-		setForm((current) => ({
-			...current,
-			processing: checked
-				? [...current.processing, typeId]
-				: current.processing.filter((id) => id !== typeId),
-		}))
-	}
-
 	async function createOrder(event) {
 		event.preventDefault()
 		if (!form.client || !form.product_type || !form.material) {
@@ -92,10 +80,6 @@ function NewOrderPage() {
 				price: form.price || '0.00',
 				due_date: form.due_date || null,
 				comment: form.comment,
-				processing_details: form.processing.map((processingType) => ({
-					processing_type: processingType,
-					parameters: {},
-				})),
 			})
 			navigate(`/orders/${data.number}`)
 		} catch (requestError) {
@@ -141,11 +125,6 @@ function NewOrderPage() {
 							<label><span className={labelClass}>Стоимость, ₽ *</span><input required type="number" min="0" step="0.01" value={form.price} onChange={(event) => setField('price', event.target.value)} placeholder="0" className={fieldClass} /></label>
 							<label><span className={labelClass}>Желаемый срок</span><input type="date" value={form.due_date} onChange={(event) => setField('due_date', event.target.value)} className={fieldClass} /></label>
 						</div>
-					</section>
-
-					<section className="rounded-lg border border-slate-200 bg-white p-4 sm:p-5">
-						<h2 className="mb-4 mt-0 border-b border-slate-100 pb-3 font-display text-sm font-bold text-slate-900">Обработка</h2>
-						{lookups.processingTypes.length ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{lookups.processingTypes.map((type) => <label key={type.id} className="flex min-h-10 items-center gap-2 rounded-md border border-slate-100 px-3 text-xs text-slate-700 hover:bg-slate-50"><input type="checkbox" checked={form.processing.includes(type.id)} onChange={(event) => toggleProcessing(type.id, event.target.checked)} className="size-4 accent-blue-600" />{type.name}</label>)}</div> : <p className="m-0 text-xs text-slate-400">Справочник обработки пока пуст</p>}
 					</section>
 
 					<section className="rounded-lg border border-slate-200 bg-white p-4 sm:p-5">

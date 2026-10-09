@@ -11,9 +11,7 @@ from .models import (
 	EmployeeProfile,
 	Material,
 	Order,
-	OrderProcessing,
 	Payment,
-	ProcessingType,
 	ProductType,
 	StatusHistory,
 )
@@ -47,11 +45,6 @@ class ClientAdmin(admin.ModelAdmin):
 	@admin.display(description="Заказов", ordering="_order_count")
 	def order_count(self, obj):
 		return obj._order_count
-
-
-class OrderProcessingInline(admin.TabularInline):
-	model = OrderProcessing
-	extra = 0
 
 
 class PaymentInline(admin.TabularInline):
@@ -119,7 +112,7 @@ class OrderAdmin(admin.ModelAdmin):
 	list_select_related = ("client", "product_type", "material", "created_by")
 	list_per_page = 30
 	readonly_fields = ("number", "created_at", "updated_at", "ready_at", "paid_amount", "balance", "is_overdue")
-	inlines = (OrderProcessingInline, PaymentInline, AttachmentInline, CommentInline, StatusHistoryInline)
+	inlines = (PaymentInline, AttachmentInline, CommentInline, StatusHistoryInline)
 
 	fieldsets = (
 		("Заказ", {"fields": ("number", "client", "status", "created_by")}),
@@ -176,14 +169,6 @@ class MaterialAdmin(admin.ModelAdmin):
 
 @admin.register(ProductType)
 class ProductTypeAdmin(admin.ModelAdmin):
-	list_display = ("name", "is_active")
-	list_filter = ("is_active",)
-	search_fields = ("name",)
-	ordering = ("name",)
-
-
-@admin.register(ProcessingType)
-class ProcessingTypeAdmin(admin.ModelAdmin):
 	list_display = ("name", "is_active")
 	list_filter = ("is_active",)
 	search_fields = ("name",)

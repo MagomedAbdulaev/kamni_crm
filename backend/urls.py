@@ -14,10 +14,10 @@ from .views import (
 	ManagerViewSet,
 	MaterialViewSet,
 	OrderViewSet,
-	ProcessingTypeViewSet,
 	ProductTypeViewSet,
 	AuditLogViewSet,
 	CRMNotificationViewSet,
+ 	AnalyticsOverviewView
 )
 
 
@@ -26,7 +26,6 @@ router.register("clients", ClientViewSet, basename="client")
 router.register("orders", OrderViewSet, basename="order")
 router.register("materials", MaterialViewSet, basename="material")
 router.register("product-types", ProductTypeViewSet, basename="product-type")
-router.register("processing-types", ProcessingTypeViewSet, basename="processing-type")
 router.register("managers", ManagerViewSet, basename="manager")
 router.register("audit", AuditLogViewSet, basename="audit")
 router.register("notifications", CRMNotificationViewSet, basename="notification")
@@ -40,5 +39,6 @@ urlpatterns = [
 	path("analytics/orders/", AnalyticsOrdersView.as_view(), name="analytics-orders"),
 	path("analytics/revenue/", AnalyticsRevenueView.as_view(), name="analytics-revenue"),
 	path("analytics/materials/", AnalyticsMaterialsView.as_view(), name="analytics-materials"),
+  path("analytics/overview/", AnalyticsOverviewView.as_view(), name="analytics-overview"),
 	path("", include(router.urls)),
 ]

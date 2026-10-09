@@ -33,9 +33,6 @@ function Aside({ isOpen, onClose, userName = 'Иван Петров', role = 'М
 						<span className="text-[10px] text-[#aeb9c3]">{role}</span>
 						<strong className="truncate text-[11px] font-semibold text-[#f4f7fa]">{userName}</strong>
 					</div>
-					<button className="grid size-9 shrink-0 place-items-center rounded-md bg-transparent p-0 text-inherit transition-colors hover:bg-[#263746] hover:text-white" type="button" aria-label="Выйти" title="Выйти" onClick={onLogout}>
-						<ArrowRight size={18} strokeWidth={2} />
-					</button>
 				</div>
 			</aside>
 		</>

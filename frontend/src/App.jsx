@@ -7,6 +7,10 @@ import MaterialsPage from './pages/MaterialsPage.jsx'
 import NewOrderPage from './pages/NewOrderPage.jsx'
 import OrdersPage from './pages/OrdersPage.jsx'
 import OrderDetailPage from './pages/OrderDetailPage.jsx'
+import ProductTypesPage from './pages/ProductTypesPage.jsx'
+import AnalyticsPage from './pages/AnalyticsPage.jsx'
+import ManagersPage from './pages/ManagersPage.jsx'
+import SettingsPage from './pages/SettingsPage.jsx'
 
 function SectionPage() {
   return (
@@ -29,10 +33,10 @@ function App() {
           <Route path="clients" element={<ClientsPage />} />
           <Route path="finance" element={<FinancePage />} />
           <Route path="materials" element={<MaterialsPage />} />
-          <Route path="product-types" element={<SectionPage />} />
-          <Route path="analytics" element={<SectionPage />} />
-          <Route path="managers" element={<SectionPage />} />
-          <Route path="settings" element={<SectionPage />} />
+          <Route path="product-types" element={<ProductTypesPage />} />
+          <Route path="analytics" element={<AnalyticsPage />} />
+          <Route path="managers" element={<ManagersPage />} />
+          <Route path="settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

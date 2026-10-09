@@ -18,6 +18,14 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+import io
+ 
+from django.http import HttpResponse
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
+
+
 
 from .models import (
 	AuditLog,
@@ -27,7 +35,6 @@ from .models import (
 	Material,
 	Order,
 	Payment,
-	ProcessingType,
 	ProductType,
 	StatusHistory,
 )
@@ -42,10 +49,212 @@ from .serializers import (
 	MaterialSerializer,
 	OrderSerializer,
 	PaymentSerializer,
-	ProcessingTypeSerializer,
 	ProductTypeSerializer,
 	UserSerializer,
 )
+
+
+from datetime import timedelta
+from decimal import Decimal
+ 
+from django.db.models import Count, DecimalField, DurationField, ExpressionWrapper, F, Sum, Value, Avg
+from django.db.models.functions import Coalesce, TruncMonth
+from django.utils import timezone
+from django.utils.dateparse import parse_date
+from rest_framework.exceptions import ValidationError
+from rest_framework.response import Response
+from rest_framework.views import APIView
+ 
+from .models import Order, Payment
+from .permissions import IsCRMUser
+ 
+ZERO = Decimal("0.00")
+ 
+ 
+EXPORT_COLUMNS = (
+	("№", 8),
+	("Создан", 17),
+	("Клиент", 24),
+	("Телефон", 17),
+	("Изделие", 28),
+	("Тип изделия", 20),
+	("Материал", 22),
+	("Толщина, мм", 12),
+	("Статус", 13),
+	("Срок", 12),
+	("Готов", 17),
+	("Стоимость", 14),
+	("Оплачено", 14),
+	("Остаток", 14),
+	("Просрочен", 11),
+	("Создал", 20),
+	("Комментарий", 40),
+)
+MONEY_COLUMNS = (12, 13, 14)
+DATE_COLUMNS = {2: "DD.MM.YYYY HH:MM", 10: "DD.MM.YYYY", 11: "DD.MM.YYYY HH:MM"}
+ 
+ 
+def _local(value):
+	"""openpyxl не умеет писать datetime с часовым поясом, поэтому переводим в локальное время."""
+	return timezone.localtime(value).replace(tzinfo=None) if value else None
+ 
+ 
+def _export_row(order):
+	paid = getattr(order, "_paid_amount", None) or Decimal("0.00")
+	creator = order.created_by
+	return [
+		order.number,
+		_local(order.created_at),
+		str(order.client),
+		order.client.phone,
+		order.product_name or order.product_type.name,
+		order.product_type.name,
+		order.material.name,
+		order.material.thickness_mm,
+		order.get_status_display(),
+		order.due_date,
+		_local(order.ready_at),
+		order.price,
+		paid,
+		order.price - paid,
+		"Да" if order.is_overdue else "Нет",
+		(creator.get_full_name() or creator.username) if creator else "",
+		order.comment,
+	]
+
+
+ 
+def _analytics_period(params):
+	"""date_from / date_to из query-параметров. По умолчанию: последние 6 месяцев."""
+	today = timezone.localdate()
+	raw_from, raw_to = params.get("date_from"), params.get("date_to")
+	date_from = parse_date(raw_from) if raw_from else None
+	date_to = parse_date(raw_to) if raw_to else None
+	if (raw_from and not date_from) or (raw_to and not date_to):
+		raise ValidationError({"date": "Укажите даты в формате YYYY-MM-DD."})
+	if not date_to:
+		date_to = today
+	if not date_from:
+		date_from = today.replace(day=1)
+		for _ in range(5):
+			date_from = (date_from - timedelta(days=1)).replace(day=1)
+	if date_from > date_to:
+		raise ValidationError({"date_to": "Конечная дата не может быть раньше начальной."})
+	return date_from, date_to
+ 
+ 
+def _person_name(first_name, last_name, fallback=""):
+	return " ".join(part for part in (first_name, last_name) if part) or fallback
+
+
+class AnalyticsOverviewView(APIView):
+	permission_classes = (IsCRMUser,)
+ 
+	def get(self, request):
+		date_from, date_to = _analytics_period(request.query_params)
+		today = timezone.localdate()
+ 
+		period_orders = Order.objects.filter(created_at__date__gte=date_from, created_at__date__lte=date_to)
+		orders = period_orders.exclude(status=Order.Status.CANCELLED)  # всё, кроме отменённых
+		payments = Payment.objects.filter(paid_at__date__gte=date_from, paid_at__date__lte=date_to)
+ 
+		# Заказы по статусам (отменённые тоже показываем)
+		by_status = list(period_orders.values("status").annotate(total=Count("number")).order_by("status"))
+ 
+		# Заказы и выручка по месяцам
+		orders_by_month = list(
+			orders.annotate(month=TruncMonth("created_at"))
+			.values("month")
+			.annotate(total=Count("number"), amount=Sum("price"))
+			.order_by("month")
+		)
+		received_by_month = list(
+			payments.annotate(month=TruncMonth("paid_at"))
+			.values("month")
+			.annotate(received=Sum("amount"))
+			.order_by("month")
+		)
+ 
+		# Топ материалов и типов изделий
+		by_material = list(
+			orders.values(name=F("material__name"))
+			.annotate(total=Count("number"), amount=Sum("price"))
+			.order_by("-total", "name")[:8]
+		)
+		by_product_type = list(
+			orders.values(name=F("product_type__name"))
+			.annotate(total=Count("number"), amount=Sum("price"))
+			.order_by("-total", "name")[:8]
+		)
+ 
+		# Заказы менеджеров
+		by_manager = [
+			{
+				"name": _person_name(row["created_by__first_name"], row["created_by__last_name"], row["created_by__username"] or "Не указан"),
+				"total": row["total"],
+			}
+			for row in orders.values("created_by__username", "created_by__first_name", "created_by__last_name")
+			.annotate(total=Count("number"))
+			.order_by("-total")[:8]
+		]
+ 
+		# Финансы и должники: считаем по заказам, чтобы JOIN с платежами не дублировал price
+		order_rows = list(
+			orders.annotate(paid=Coalesce(Sum("payments__amount"), Value(ZERO), output_field=DecimalField()))
+			.values("client_id", "client__first_name", "client__last_name", "client__phone", "price", "paid")
+		)
+		order_total = sum((row["price"] for row in order_rows), ZERO)
+		paid_total = sum((row["paid"] for row in order_rows), ZERO)
+ 
+		debts = {}
+		for row in order_rows:
+			debt = row["price"] - row["paid"]
+			if debt <= 0:
+				continue
+			item = debts.setdefault(
+				row["client_id"],
+				{
+					"client_id": row["client_id"],
+					"name": _person_name(row["client__first_name"], row["client__last_name"]),
+					"phone": row["client__phone"],
+					"orders": 0,
+					"debt": ZERO,
+				},
+			)
+			item["orders"] += 1
+			item["debt"] += debt
+		top_debtors = sorted(debts.values(), key=lambda item: item["debt"], reverse=True)[:10]
+ 
+		# Средний срок от создания до готовности (дни)
+		avg_duration = orders.filter(ready_at__isnull=False).aggregate(
+			avg=Avg(ExpressionWrapper(F("ready_at") - F("created_at"), output_field=DurationField()))
+		)["avg"]
+ 
+		return Response(
+			{
+				"period": {"date_from": date_from, "date_to": date_to},
+				"summary": {
+					"orders_count": len(order_rows),
+					"order_total": order_total,
+					"paid_on_orders": paid_total,
+					"debt_total": order_total - paid_total,
+					"received_in_period": payments.aggregate(total=Sum("amount"))["total"] or ZERO,
+					"overdue_count": orders.filter(
+						due_date__lt=today, status__in=(Order.Status.NEW, Order.Status.IN_PROGRESS)
+					).count(),
+					"avg_lead_days": round(avg_duration.total_seconds() / 86400, 1) if avg_duration else None,
+				},
+				"by_status": by_status,
+				"orders_by_month": orders_by_month,
+				"received_by_month": received_by_month,
+				"by_material": by_material,
+				"by_product_type": by_product_type,
+				"by_manager": by_manager,
+				"top_debtors": top_debtors,
+			}
+		)
+ 
+
 
 
 User = get_user_model()
@@ -134,7 +343,6 @@ class OrderViewSet(viewsets.ModelViewSet):
 		queryset = (
 			Order.objects.select_related("client", "product_type", "material", "created_by")
 			.prefetch_related(
-				"processing_details__processing_type",
 				"payments__created_by",
 				"attachments",
 				"status_history__changed_by",
@@ -212,6 +420,70 @@ class OrderViewSet(viewsets.ModelViewSet):
 				)
 		return Response(self.get_serializer(order).data)
 
+	@action(detail=False, methods=("get",), url_path="export")
+	def export(self, request):
+		"""Excel-файл с заказами. Принимает те же фильтры, что и список заказов (status, q, period, ...)."""
+		orders = list(self.filter_queryset(self.get_queryset()))
+ 
+		workbook = Workbook()
+		sheet = workbook.active
+		sheet.title = "Заказы"
+		sheet.append([title for title, _ in EXPORT_COLUMNS])
+		for order in orders:
+			sheet.append(_export_row(order))
+ 
+		# Шапка
+		header_fill = PatternFill("solid", start_color="1F68AD")
+		for cell in sheet[1]:
+			cell.font = Font(bold=True, color="FFFFFF")
+			cell.fill = header_fill
+			cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+		sheet.row_dimensions[1].height = 30
+ 
+		# Ширина колонок, форматы, защита текста от интерпретации как формулы (например, "=1+1" в комментарии)
+		for index, (_, width) in enumerate(EXPORT_COLUMNS, start=1):
+			sheet.column_dimensions[get_column_letter(index)].width = width
+		for row in sheet.iter_rows(min_row=2):
+			for cell in row:
+				if isinstance(cell.value, str):
+					cell.data_type = "s"
+				elif cell.column in DATE_COLUMNS:
+					cell.number_format = DATE_COLUMNS[cell.column]
+				elif cell.column in MONEY_COLUMNS:
+					cell.number_format = "#,##0.00"
+		for row in sheet.iter_rows(min_row=2, min_col=17, max_col=17):
+			for cell in row:
+				cell.alignment = Alignment(wrap_text=True, vertical="top")
+ 
+		sheet.freeze_panes = "C2"
+		sheet.auto_filter.ref = f"A1:{get_column_letter(len(EXPORT_COLUMNS))}{len(orders) + 1}"
+ 
+		# Итоги. SUBTOTAL(109) пересчитывается, когда пользователь фильтрует таблицу в Excel
+		if orders:
+			total_row = len(orders) + 2
+			sheet.cell(total_row, 11, "Итого:").font = Font(bold=True)
+			for column in MONEY_COLUMNS:
+				letter = get_column_letter(column)
+				cell = sheet.cell(total_row, column, f"=SUBTOTAL(109,{letter}2:{letter}{total_row - 1})")
+				cell.font = Font(bold=True)
+				cell.number_format = "#,##0.00"
+ 
+		AuditLog.objects.create(
+			actor=request.user,
+			action="orders.exported",
+			description=f"Выгружено заказов в Excel: {len(orders)}",
+		)
+ 
+		buffer = io.BytesIO()
+		workbook.save(buffer)
+		response = HttpResponse(
+			buffer.getvalue(),
+			content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+		)
+		response["Content-Disposition"] = f'attachment; filename="orders_{timezone.localdate():%Y-%m-%d}.xlsx"'
+		return response
+
+  
 	@action(detail=True, methods=("get", "post"), url_path="payments")
 	def payments(self, request, pk=None):
 		order = self.get_object()
@@ -294,7 +566,7 @@ class OrderViewSet(viewsets.ModelViewSet):
 class MaterialViewSet(viewsets.ModelViewSet):
 	queryset = Material.objects.all()
 	serializer_class = MaterialSerializer
-	permission_classes = (IsCRMUser, IsAdminOrReadOnly)
+	permission_classes = (IsCRMUser, )
 	filter_backends = (filters.SearchFilter, filters.OrderingFilter)
 	search_fields = ("name", "category")
 	ordering_fields = ("name", "category")
@@ -314,15 +586,7 @@ class MaterialViewSet(viewsets.ModelViewSet):
 class ProductTypeViewSet(viewsets.ModelViewSet):
 	queryset = ProductType.objects.all()
 	serializer_class = ProductTypeSerializer
-	permission_classes = (IsCRMUser, IsAdminOrReadOnly)
-	filter_backends = (filters.SearchFilter,)
-	search_fields = ("name",)
-
-
-class ProcessingTypeViewSet(viewsets.ModelViewSet):
-	queryset = ProcessingType.objects.all()
-	serializer_class = ProcessingTypeSerializer
-	permission_classes = (IsCRMUser, IsAdminOrReadOnly)
+	permission_classes = (IsCRMUser, )
 	filter_backends = (filters.SearchFilter,)
 	search_fields = ("name",)
 
@@ -514,7 +778,7 @@ class AnalyticsRevenueView(APIView):
 			Order.objects.filter(created_at__date__gte=date_from, created_at__date__lte=date_to)
 			.exclude(status=Order.Status.CANCELLED)
 			.select_related("client", "product_type", "material", "created_by")
-			.prefetch_related("processing_details__processing_type", "payments__created_by", "attachments", "status_history__changed_by")
+			.prefetch_related("payments__created_by", "attachments", "status_history__changed_by")
 		)
 		order_financials = list(orders.annotate(_paid_amount=Sum("payments__amount")).values("price", "_paid_amount"))
 		order_total = sum((row["price"] for row in order_financials), Decimal("0.00"))

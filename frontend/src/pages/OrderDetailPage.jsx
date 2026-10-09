@@ -82,10 +82,6 @@ function OrderDetailPage() {
 			price: String(order.price ?? '0'),
 			due_date: order.due_date ?? '',
 			comment: order.comment ?? '',
-			processing_details: order.processing_details.map((item) => ({
-				processing_type: String(item.processing_type),
-				parameters: item.parameters ?? {},
-			})),
 		})
 		setEditing(true)
 		if (lookups) return
@@ -94,13 +90,11 @@ function OrderDetailPage() {
 				api.get('clients/'),
 				api.get('materials/'),
 				api.get('product-types/'),
-				api.get('processing-types/'),
 			])
 			setLookups({
 				clients: clients.data.results ?? clients.data,
 				materials: materials.data.results ?? materials.data,
 				productTypes: productTypes.data.results ?? productTypes.data,
-				processingTypes: processingTypes.data.results ?? processingTypes.data,
 			})
 		} catch {
 			setError('Не удалось загрузить справочники для редактирования.')
@@ -109,17 +103,6 @@ function OrderDetailPage() {
 
 	function setField(name, value) {
 		setForm((current) => ({ ...current, [name]: value }))
-	}
-
-	function toggleProcessing(typeId, checked) {
-		setForm((current) => {
-			const existing = current.processing_details.find((item) => item.processing_type === typeId)
-			const processingDetails = checked
-				? [...current.processing_details, { processing_type: typeId, parameters: {} }]
-				: current.processing_details.filter((item) => item.processing_type !== typeId)
-			if (checked && existing) return current
-			return { ...current, processing_details: processingDetails }
-		})
 	}
 
 	async function saveOrder(event) {
@@ -136,7 +119,6 @@ function OrderDetailPage() {
 				price: form.price,
 				due_date: form.due_date || null,
 				comment: form.comment,
-				processing_details: form.processing_details,
 			})
 			setOrder(data)
 			setStatusDraft(data.status)
@@ -242,7 +224,6 @@ function OrderDetailPage() {
 						<label><span className={labelClass}>Цена, ₽</span><input required type="number" min="0" step="0.01" value={form.price} onChange={(event) => setField('price', event.target.value)} className={inputClass} /></label>
 						<label><span className={labelClass}>Желаемый срок</span><input type="date" value={form.due_date} onChange={(event) => setField('due_date', event.target.value)} className={inputClass} /></label>
 					</div>
-					<fieldset className="mt-4 rounded-md border border-slate-200 bg-white p-3"><legend className="px-1 text-[11px] font-semibold text-slate-700">Обработка</legend><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{lookups.processingTypes.map((type) => <label key={type.id} className="flex items-center gap-2 text-xs text-slate-700"><input type="checkbox" checked={form.processing_details.some((item) => Number(item.processing_type) === type.id)} onChange={(event) => toggleProcessing(type.id, event.target.checked)} className="size-4 accent-blue-600" />{type.name}</label>)}</div></fieldset>
 					<label className="mt-4 block"><span className={labelClass}>Комментарий к заказу</span><textarea rows="3" value={form.comment} onChange={(event) => setField('comment', event.target.value)} className={`${inputClass} h-auto py-2`} /></label>
 					<div className="mt-4 flex justify-end gap-2"><button type="button" onClick={() => setEditing(false)} className="h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50">Отмена</button><button type="submit" disabled={saving} className="inline-flex h-9 items-center gap-2 rounded-md bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60"><Save size={15} /> Сохранить</button></div>
 				</>}</form>}
@@ -259,7 +240,6 @@ function OrderDetailPage() {
 							<div><dt className="text-[10px] text-slate-500">Срок</dt><dd className="mt-1 text-sm font-medium text-slate-900">{order.due_date || 'Не указан'}</dd></div>
 						</dl>
 						{order.comment && <p className="mt-4 border-t border-slate-100 pt-3 text-xs leading-relaxed text-slate-600">{order.comment}</p>}
-						<div className="mt-4 border-t border-slate-100 pt-3"><h3 className="mb-2 text-[11px] font-semibold text-slate-700">Обработка</h3>{order.processing_details.length ? <div className="flex flex-wrap gap-2">{order.processing_details.map((item) => <span key={item.id} className="rounded bg-slate-100 px-2.5 py-1.5 text-[11px] text-slate-700">{item.processing_type_name || lookups?.processingTypes.find((type) => type.id === item.processing_type)?.name || `Обработка ${item.processing_type}`}{Object.keys(item.parameters ?? {}).length > 0 && <span className="ml-1 text-slate-500">{Object.values(item.parameters).join(', ')}</span>}</span>)}</div> : <p className="m-0 text-xs text-slate-400">Обработка не указана</p>}</div>
 					</Section>
 
 					<Section title="Оплаты">

@@ -84,19 +84,6 @@ class ProductType(models.Model):
 		return self.name
 
 
-class ProcessingType(models.Model):
-	name = models.CharField("Название", max_length=100, unique=True)
-	is_active = models.BooleanField("Активен", default=True)
-
-	class Meta:
-		ordering = ("name",)
-		verbose_name = "Вид обработки"
-		verbose_name_plural = "Виды обработки"
-
-	def __str__(self):
-		return self.name
-
-
 class Order(models.Model):
 	class Status(models.TextChoices):
 		NEW = "new", "Новый"
@@ -113,13 +100,6 @@ class Order(models.Model):
 	product_name = models.CharField("Название изделия", max_length=150, blank=True)
 	material = models.ForeignKey(
 		Material, on_delete=models.PROTECT, related_name="orders", verbose_name="Материал"
-	)
-	processing_types = models.ManyToManyField(
-		ProcessingType,
-		through="OrderProcessing",
-		related_name="orders",
-		verbose_name="Обработка",
-		blank=True,
 	)
 	comment = models.TextField("Комментарий к заказу", blank=True)
 	price = models.DecimalField(
@@ -167,24 +147,6 @@ class Order(models.Model):
 			and self.due_date < timezone.localdate()
 			and self.status not in (self.Status.READY, self.Status.ISSUED, self.Status.CANCELLED)
 		)
-
-
-class OrderProcessing(models.Model):
-	order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="processing_details")
-	processing_type = models.ForeignKey(
-		ProcessingType, on_delete=models.PROTECT, related_name="order_details"
-	)
-	parameters = models.JSONField("Параметры обработки", default=dict, blank=True)
-
-	class Meta:
-		constraints = [
-			models.UniqueConstraint(fields=("order", "processing_type"), name="unique_order_processing_type")
-		]
-		verbose_name = "Обработка заказа"
-		verbose_name_plural = "Обработки заказа"
-
-	def __str__(self):
-		return f"{self.order} — {self.processing_type}"
 
 
 class Payment(models.Model):

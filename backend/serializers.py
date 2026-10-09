@@ -13,9 +13,7 @@ from .models import (
 	EmployeeProfile,
 	Material,
 	Order,
-	OrderProcessing,
 	Payment,
-	ProcessingType,
 	ProductType,
 	StatusHistory,
 )
@@ -93,10 +91,7 @@ class ProductTypeSerializer(serializers.ModelSerializer):
 		fields = ("id", "name", "is_active")
 
 
-class ProcessingTypeSerializer(serializers.ModelSerializer):
-	class Meta:
-		model = ProcessingType
-		fields = ("id", "name", "is_active")
+
 
 
 class OrderHistoryItemSerializer(serializers.ModelSerializer):
@@ -106,7 +101,7 @@ class OrderHistoryItemSerializer(serializers.ModelSerializer):
 
 	class Meta:
 		model = Order
-		fields = ("number", "product_type_name", "product_name", "material_name", "status", "due_date", "created_at")
+		fields = ("number", "product_type_name", "product_name", "material_name", "status", "due_date", "created_at", "material_thickness_mm")
 
 
 class ClientSerializer(serializers.ModelSerializer):
@@ -164,14 +159,6 @@ class ClientSerializer(serializers.ModelSerializer):
 		return client
 
 
-class OrderProcessingSerializer(serializers.ModelSerializer):
-	processing_type = serializers.PrimaryKeyRelatedField(queryset=ProcessingType.objects.all())
-	processing_type_name = serializers.CharField(source="processing_type.name", read_only=True)
-
-	class Meta:
-		model = OrderProcessing
-		fields = ("id", "processing_type", "processing_type_name", "parameters")
-		read_only_fields = ("id",)
 
 
 class PaymentSerializer(serializers.ModelSerializer):
@@ -231,7 +218,6 @@ class OrderSerializer(serializers.ModelSerializer):
 	product_type_name = serializers.CharField(source="product_type.name", read_only=True)
 	material_name = serializers.CharField(source="material.name", read_only=True)
 	material_thickness_mm = serializers.IntegerField(source="material.thickness_mm", read_only=True, allow_null=True)
-	processing_details = OrderProcessingSerializer(many=True, required=False)
 	payments = PaymentSerializer(many=True, read_only=True)
 	attachments = AttachmentSerializer(many=True, read_only=True)
 	status_history = StatusHistorySerializer(many=True, read_only=True)
@@ -254,7 +240,6 @@ class OrderSerializer(serializers.ModelSerializer):
 			"material",
 			"material_name",
 			"material_thickness_mm",
-			"processing_details",
 			"comment",
 			"price",
 			"status",
@@ -278,23 +263,13 @@ class OrderSerializer(serializers.ModelSerializer):
 	def get_balance(self, order):
 		return order.price - self.get_paid_amount(order)
 
-	def _save_processing_details(self, order, details):
-		if details is None:
-			return
-		order.processing_details.all().delete()
-		OrderProcessing.objects.bulk_create(
-			OrderProcessing(order=order, **detail) for detail in details
-		)
-
 	@transaction.atomic
 	def create(self, validated_data):
-		processing_details = validated_data.pop("processing_details", [])
 		request = self.context.get("request")
 		order = Order.objects.create(
 			**validated_data,
 			created_by=request.user if request and request.user.is_authenticated else None,
 		)
-		self._save_processing_details(order, processing_details)
 		StatusHistory.objects.create(order=order, new_status=order.status, changed_by=order.created_by)
 		AuditLog.objects.create(
 			actor=order.created_by,
@@ -306,14 +281,10 @@ class OrderSerializer(serializers.ModelSerializer):
 
 	@transaction.atomic
 	def update(self, instance, validated_data):
-		processing_details = validated_data.pop("processing_details", None)
 		changed_fields = [
 			field for field, value in validated_data.items() if getattr(instance, field) != value
 		]
 		order = super().update(instance, validated_data)
-		self._save_processing_details(order, processing_details)
-		if processing_details is not None:
-			changed_fields.append("processing_details")
 		if changed_fields:
 			request = self.context.get("request")
 			AuditLog.objects.create(
